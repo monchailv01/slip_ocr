@@ -9,7 +9,6 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 # ============= Utilities =============
-
 TH_MONTH = {
     "ม.ค.":1,"ก.พ.":2,"มี.ค.":3,"เม.ย.":4,"พ.ค.":5,"มิ.ย.":6,
     "ก.ค.":7,"ส.ค.":8,"ก.ย.":9,"ต.ค.":10,"พ.ย.":11,"ธ.ค.":12,
@@ -18,7 +17,6 @@ TH_MONTH = {
 }
 
 def _safe_json(s: str) -> dict | None:
-    """ลบ code fence แล้วลอง parse เป็น JSON"""
     s = s.strip()
     s = re.sub(r"^```(json)?", "", s, flags=re.IGNORECASE).strip()
     s = re.sub(r"```$", "", s).strip()
@@ -55,7 +53,6 @@ def _norm_date_th(s: str | None) -> str | None:
     if not s:
         return None
     s = s.replace("น.", "").strip()
-    # 21 ต.ค. 68 12:16 / 21 ต.ค. 2568 12:16
     m = re.search(r"(\d{1,2})\s+([ก-힣\.]+)\s+(\d{2,4})\s+(\d{1,2}):(\d{2})", s)
     if m:
         d, mon, y, hh, mm = m.groups()
@@ -63,13 +60,12 @@ def _norm_date_th(s: str | None) -> str | None:
         if mon_num:
             y = int(y)
             if y < 100: y += 2000
-            if y > 2400: y -= 543  # พ.ศ. → ค.ศ.
+            if y > 2400: y -= 543
             try:
-                dt = datetime.datetime(int(y), mon_num, int(d), int(hh), int(mm))
+                dt = datetime.datetime(y, mon_num, int(d), int(hh), int(mm))
                 return dt.strftime("%Y-%m-%d %H:%M")
             except ValueError:
                 pass
-    # fallback dd/mm/yyyy hh:mm
     m = re.search(r"(\d{1,2})/(\d{1,2})/(\d{2,4})\s+(\d{1,2}):(\d{2})", s)
     if m:
         d,mn,y,hh,mm = m.groups()
@@ -83,7 +79,6 @@ def _norm_date_th(s: str | None) -> str | None:
             return None
     return None
 
-# ทำความสะอาดชื่อ (ไทย/อังกฤษ) และ normalize คำนำหน้าชื่อ
 HONORIFICS = {
     "น.ส.":"น.ส.", "น.ส":"น.ส.", "นางสาว":"นางสาว", "นาง":"นาง", "นาย":"นาย",
     "ด.ช.":"ด.ช.", "ด.ญ.":"ด.ญ.", "mr":"Mr.", "mrs":"Mrs.", "ms":"Ms.", "miss":"Miss"
@@ -91,16 +86,9 @@ HONORIFICS = {
 def _clean_name(name: str | None) -> str | None:
     if not name:
         return None
-    s = str(name)
-    # ตัดอักขระแปลก ๆ เหลือไทย/อังกฤษ/จุด/เว้นวรรค/ขีด
-    s = re.sub(r"[^A-Za-zก-๙\.\-\s]", " ", s)
-    # ยุบช่องว่างซ้ำ
+    s = re.sub(r"[^A-Za-zก-๙\.\-\s]", " ", str(name))
     s = re.sub(r"\s{2,}", " ", s).strip()
-
-    # แก้จุดซ้ำ "น.ส.." → "น.ส."
     s = re.sub(r"\.{2,}", ".", s)
-
-    # ปรับคำนำหน้า
     tokens = s.split()
     if tokens:
         first = tokens[0].lower()
@@ -108,11 +96,7 @@ def _clean_name(name: str | None) -> str | None:
         if norm:
             tokens[0] = norm
             s = " ".join(tokens)
-
-    # ถ้าสั้นเกินไปให้คืนค่าว่าง
-    if len(s) < 2:
-        return ""
-    return s
+    return s if len(s) >= 2 else ""
 
 # ============= Load env & OpenAI client =============
 load_dotenv()
@@ -122,29 +106,28 @@ client = OpenAI(api_key=API_KEY) if API_KEY else None
 
 # ============= LLM Flow =============
 def process_slip_llm(image_path: str):
-    """
-    เรียก GPT-4o mini ด้วย data URL (base64) ให้ตอบเป็น JSON แท้
-    และ normalize ฟิลด์สำคัญ + ทำความสะอาดชื่อคนโอน/คนรับ
-    """
+    """เรียก GPT-4o mini วิเคราะห์สลิปโอนเงินไทย ตอบกลับเป็น JSON"""
     if not os.path.isfile(image_path):
         return {"error": f"image not found: {image_path}"}
     if not client:
         return {"error": "OPENAI_API_KEY not found. Set it in .env"}
 
     mime, _ = mimetypes.guess_type(image_path)
-    if mime is None: mime = "image/jpeg"
+    if mime is None:
+        mime = "image/jpeg"
     with open(image_path, "rb") as f:
         b64 = base64.b64encode(f.read()).decode("utf-8")
     data_url = f"data:{mime};base64,{b64}"
 
     prompt = (
         "คุณคือระบบวิเคราะห์สลิปโอนเงินของธนาคารไทย "
-        "ตอบกลับเป็น JSON เท่านั้น (ไม่ใส่โค้ดบล็อก/คำอธิบายอื่น) "
+        "ตอบกลับเป็น JSON เท่านั้น (ไม่ใส่โค้ดบล็อกหรือคำอธิบายอื่น) "
         'รูปแบบคีย์: {'
-        '"bank":"", "date":"", "amount":"", "account":"", "transaction_id":"", '
-        '"sender_name":"", "recipient_name":""'
+        '"bank":"", "date":"", "amount":"", '
+        '"sender_account":"", "recipient_account":"", '
+        '"transaction_id":"", "sender_name":"", "recipient_name":""'
         '} '
-        "หากไม่พบคีย์ใดให้ใส่ค่าว่าง \"\""
+        'หากไม่พบคีย์ใดให้ใส่ค่าว่าง ""'
     )
 
     try:
@@ -158,39 +141,30 @@ def process_slip_llm(image_path: str):
                 ],
             }],
             temperature=0,
-            max_tokens=600,
+            max_tokens=700,
             response_format={"type": "json_object"},
         )
         raw_text = resp.choices[0].message.content.strip()
         data = _safe_json(raw_text) or {}
 
-        bank       = _norm_bank(data.get("bank", ""))
-        date_iso   = _norm_date_th(data.get("date", ""))
-        amount     = _norm_amount(data.get("amount", ""))
-        account    = data.get("account", "") or data.get("to_account", "")
-        txid       = data.get("transaction_id", "") or data.get("ref", "")
-        sender     = _clean_name(data.get("sender_name", ""))
-        recipient  = _clean_name(data.get("recipient_name", ""))
-
         result = {
-            "bank": bank or "",
-            "date": date_iso or "",
-            "amount": amount or "",
-            "account": account or "",
-            "transaction_id": txid or "",
-            "sender_name": sender or "",
-            "recipient_name": recipient or "",
-            "_llm_raw": raw_text,  # เก็บไว้ให้ฝั่ง app.py ทำ log ภายใน (ไม่โชว์หน้าเว็บ)
+            "bank": _norm_bank(data.get("bank", "")) or "",
+            "date": _norm_date_th(data.get("date", "")) or "",
+            "amount": _norm_amount(data.get("amount", "")) or "",
+            "sender_account": data.get("sender_account", "").strip(),
+            "recipient_account": data.get("recipient_account", "").strip(),
+            "transaction_id": data.get("transaction_id", "") or data.get("ref", ""),
+            "sender_name": _clean_name(data.get("sender_name", "")),
+            "recipient_name": _clean_name(data.get("recipient_name", "")),
+            "_llm_raw": raw_text,  # log ภายใน
         }
-        # ลบคีย์ที่ว่างออกไป
         return {k: v for k, v in result.items() if v != ""}
 
     except Exception as e:
         return {"error": f"{type(e).__name__}: {e}"}
 
-# ============= Fallback OCR (optional) =============
+# ============= Fallback OCR =============
 def process_slip_ocr(image_path: str):
-    """สำรอง: OCR ปกติด้วย pytesseract (ไม่แม่นเท่า LLM)"""
     try:
         import pytesseract
         from PIL import Image
