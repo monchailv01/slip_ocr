@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Slip OCR / LLM Extractor</title>
+<style>
+  :root{
+    --bg:#0b1020; --card:#0f172a; --muted:#94a3b8; --text:#e2e8f0;
+    --primary:#22d3ee; --primary-2:#38bdf8; --ok:#22c55e; --border:#1f2a44;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, "Noto Sans Thai", Inter, "Helvetica Neue", Arial, sans-serif;
+    background:linear-gradient(180deg, #0a0f1f 0%, #0b1020 100%);
+    color:var(--text);
+  }
+  .wrap{max-width:980px;margin:40px auto;padding:0 20px}
+  .header{
+    display:flex;justify-content:space-between;align-items:center;margin-bottom:18px
+  }
+  .title{font-weight:800;letter-spacing:.3px;font-size:clamp(20px,3vw,28px)}
+  .badge{font-size:12px;padding:6px 10px;border:1px solid var(--border);
+    border-radius:999px;color:var(--muted);background:#0c1730}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px}
+  .grid{display:grid;gap:16px;grid-template-columns:1fr}
+  @media (min-width:900px){ .grid{grid-template-columns:1.15fr .85fr} }
+
+  .drop{
+    border:1.5px dashed #2a3a60;border-radius:14px;padding:20px; text-align:center;
+    background:linear-gradient(180deg,#0e1830 0,#0c1427 100%);
+    transition:.2s ease;
+  }
+  .drop:hover{border-color:#3a5fa5}
+  .drop input{display:none}
+  .drop h3{margin:6px 0 4px 0}
+  .muted{color:var(--muted)}
+  .btn{
+    appearance:none;border:0; border-radius:10px; padding:10px 16px; font-weight:700;
+    background:linear-gradient(90deg, var(--primary), var(--primary-2));
+    color:#00121f; cursor:pointer; transition:transform .05s ease;
+  }
+  .btn[disabled]{opacity:.6;cursor:not-allowed}
+  .btn:active{transform:translateY(1px)}
+  .row{display:flex;gap:10px;justify-content:center;align-items:center;margin-top:14px}
+  .preview{display:flex;justify-content:center;margin-top:14px}
+  .preview img{max-height:280px; max-width:100%; border-radius:12px; border:1px solid var(--border)}
+  .hint{font-size:12px;color:var(--muted); margin-top:6px}
+
+  .panel{background:#0a1327;border:1px solid var(--border);border-radius:12px;padding:14px}
+  pre{
+    margin:0; background:#0a1327; color:#e5eefc; border-radius:10px; padding:16px;
+    overflow:auto; max-height:520px; font-size:13.5px; line-height:1.45;
+  }
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .chip{padding:6px 10px;border-radius:999px;border:1px solid var(--border);font-size:12px;color:var(--muted)}
+  .ok{color:var(--ok)}
+  .spinner{width:16px;height:16px;border:2px solid #69e2ff;border-top-color:transparent;border-radius:50%;display:inline-block;animation:spin .8s linear infinite;margin-right:6px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .actions{display:flex;gap:10px;margin-top:10px}
+  .ghost{background:#0d1a33;color:#cfe9ff;border:1px solid var(--border)}
+  .footer{margin-top:24px;color:#7a8aa8;font-size:12px;text-align:center}
+  code.kv{padding:6px 8px;border-radius:8px;background:#0e1a36;border:1px solid var(--border)}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="header">
+      <div class="title">Slip Extractor <span class="badge">LLM Ready</span></div>
+      <div class="chips">
+        <div class="chip">ไทย/อังกฤษ</div>
+        <div class="chip">รองรับหลายธนาคาร</div>
+        <div class="chip">JSON Output</div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <!-- Left: Uploader -->
+      <div class="card">
+        <div class="drop" id="drop">
+          <svg width="44" height="44" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 6v12m6-6H6" stroke="#7dd3fc" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <h3>ลากรูปสลิปมาวางที่นี่</h3>
+          <div class="muted">หรือ</div>
+          <div class="row">
+            <label class="btn" for="file">เลือกไฟล์</label>
+            <input id="file" type="file" accept="image/png, image/jpeg" />
+          </div>
+          <div class="hint">รองรับ .jpg / .png ขนาดไม่เกิน ~15MB</div>
+          <div class="preview" id="preview" hidden></div>
+          <div class="row">
+            <button id="analyze" class="btn" disabled>วิเคราะห์</button>
+            <button id="reset" class="btn ghost" type="button" hidden>ล้างค่า</button>
+          </div>
+          <div class="hint" id="status"></div>
+        </div>
+      </div>
+
+      <!-- Right: Output -->
+      <div class="card">
+        <div class="panel">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
+            <div class="muted">ผลลัพธ์</div>
+            <div class="actions">
+              <button id="copy" class="btn ghost" type="button">คัดลอก JSON</button>
+              <button id="download" class="btn ghost" type="button">ดาวน์โหลด .json</button>
+            </div>
+          </div>
+          <pre id="out">{}</pre>
+        </div>
+
+        <div class="panel" style="margin-top:12px">
+          <div class="muted" style="margin-bottom:6px">สถานะ</div>
+          <div id="pillars">
+            <span>API: <code class="kv" id="apiStat">รออัปโหลด</code></span>
+            <span style="margin-left:10px">โหมด: <code class="kv" id="mode">ไม่ทราบ</code></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">
+      ทำงานร่วมกับ LLM (GPT-4o mini) หรือ Tesseract ตามการตั้งค่าใน <code class="kv">.env</code>
+    </div>
+  </div>
+
+<script>
+(function(){
+  const fileInput = document.getElementById('file');
+  const drop = document.getElementById('drop');
+  const preview = document.getElementById('preview');
+  const analyzeBtn = document.getElementById('analyze');
+  const resetBtn = document.getElementById('reset');
+  const out = document.getElementById('out');
+  const statusEl = document.getElementById('status');
+  const apiStat = document.getElementById('apiStat');
+  const modeEl = document.getElementById('mode');
+  const copyBtn = document.getElementById('copy');
+  const downloadBtn = document.getElementById('download');
+
+  let pickedFile = null;
+
+  // drag & drop
+  ['dragenter','dragover'].forEach(evt => {
+    drop.addEventListener(evt, e => { e.preventDefault(); drop.style.borderColor = '#3a5fa5'; });
+  });
+  ['dragleave','drop'].forEach(evt => {
+    drop.addEventListener(evt, e => { e.preventDefault(); drop.style.borderColor = '#2a3a60'; });
+  });
+  drop.addEventListener('drop', e => {
+    const f = e.dataTransfer.files?.[0];
+    if (f) setFile(f);
+  });
+
+  fileInput.addEventListener('change', e => {
+    const f = e.target.files?.[0];
+    if (f) setFile(f);
+  });
+
+  function setFile(f){
+    pickedFile = f;
+    analyzeBtn.disabled = false;
+    resetBtn.hidden = false;
+    const url = URL.createObjectURL(f);
+    preview.innerHTML = `<img src="${url}" alt="preview">`;
+    preview.hidden = false;
+    status('เลือกไฟล์แล้ว', 'ok');
+  }
+
+  resetBtn.addEventListener('click', ()=>{
+    pickedFile = null;
+    fileInput.value = '';
+    preview.hidden = true;
+    preview.innerHTML = '';
+    out.textContent = '{}';
+    analyzeBtn.disabled = true;
+    resetBtn.hidden = true;
+    status('รออัปโหลด', null);
+    apiStat.textContent = 'รออัปโหลด';
+    modeEl.textContent = 'ไม่ทราบ';
+  });
+
+  analyzeBtn.addEventListener('click', async ()=>{
+    if (!pickedFile) return;
+    analyzeBtn.disabled = true;
+    analyzeBtn.innerHTML = `<span class="spinner"></span>กำลังประมวลผล...`;
+    status('อัปโหลดไฟล์และวิเคราะห์...', null);
+    apiStat.textContent = 'กำลังส่งคำขอ...';
+
+    try{
+      const fd = new FormData();
+      fd.append('file', pickedFile);
+
+      // ใช้ endpoint เดิม /upload (ตัว backend จะตัดสินใจ OCR_MODE)
+      const res = await fetch('/upload', { method:'POST', body: fd });
+      const json = await res.json();
+
+      // รองรับผลสองแบบ:
+      // 1) { mode:"llm", result:{...จริง...} }
+      // 2) { mode:"llm", result: "{ ...string... }" }
+      // 3) { bank/date/amount/... } ตรง ๆ
+      let finalObj = json;
+
+      if (json.result) {
+        if (typeof json.result === 'string') {
+          try { finalObj = JSON.parse(json.result); }
+          catch { finalObj = { _raw: json.result }; }
+        } else if (typeof json.result === 'object') {
+          finalObj = json.result;
+        }
+      }
+
+      // เพิ่ม meta ไว้โชว์
+      if (json.mode) modeEl.textContent = json.mode.toUpperCase();
+      else modeEl.textContent = 'N/A';
+
+      out.textContent = JSON.stringify(finalObj, null, 2);
+      status('สำเร็จ', 'ok');
+      apiStat.textContent = 'สำเร็จ';
+    }catch(err){
+      out.textContent = JSON.stringify({ error: String(err) }, null, 2);
+      status('ล้มเหลว: ' + String(err), null);
+      apiStat.textContent = 'ล้มเหลว';
+    }finally{
+      analyzeBtn.disabled = false;
+      analyzeBtn.textContent = 'วิเคราะห์';
+    }
+  });
+
+  copyBtn.addEventListener('click', async ()=>{
+    try{
+      await navigator.clipboard.writeText(out.textContent);
+      status('คัดลอก JSON แล้ว', 'ok');
+    }catch(e){
+      status('คัดลอกไม่สำเร็จ', null);
+    }
+  });
+
+  downloadBtn.addEventListener('click', ()=>{
+    const blob = new Blob([out.textContent], {type:'application/json'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'slip_result.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+
+  function status(msg, ok){
+    statusEl.innerHTML = ok ? `<span class="ok">●</span> ${msg}` : msg;
+  }
+})();
+</script>
+</body>
+</html>
