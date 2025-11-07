@@ -171,113 +171,50 @@
 
     analyzeBtn.addEventListener('click', async ()=>{
       if (!pickedFile) return;
-      // Start a WAIT before sending to backend so DB can settle (45s default)
-      const WAIT_SECONDS = 45;
-      let remaining = WAIT_SECONDS;
-
       analyzeBtn.disabled = true;
       analyzeBtn.innerHTML = `<span class="spinner"></span>Preparing...`;
-      status(`รอการดำเนินการ: ${remaining}s`, null);
-      apiStat.textContent = 'รอการดำเนินการ...';
+      status('อัปโหลดไฟล์และวิเคราะห์...', null);
+      apiStat.textContent = 'กำลังส่งคำขอ...';
 
-      // create skip button next to analyze button
-      let skipBtn = document.getElementById('skip-wait-btn');
-      if (!skipBtn) {
-        skipBtn = document.createElement('button');
-        skipBtn.id = 'skip-wait-btn';
-        skipBtn.textContent = 'Proceed now';
-        skipBtn.className = 'btn ghost';
-        skipBtn.style.marginLeft = '10px';
-        analyzeBtn.parentNode.appendChild(skipBtn);
-      }
+      try{
+        const fd = new FormData();
+        fd.append('file', pickedFile);
 
-        // create an overlay showing big countdown and progress bar
-        let overlay = document.getElementById('wait-overlay');
-        if (!overlay){
-          overlay = document.createElement('div');
-          overlay.id = 'wait-overlay';
-          overlay.className = 'waitOverlay';
-          overlay.innerHTML = `
-            <div class="waitCard">
-              <div class="muted">กำลังรอตรวจสอบจากธนาคาร</div>
-              <div class="waitCount">45s</div>
-              <div class="waitMsg">ระบบจะรอ 45 วินาทีให้ข้อมูลอัปเดตในฐานข้อมูล</div>
-              <div class="waitBar"><div class="waitBarInner" style="width:0%"></div></div>
-            </div>`;
-          document.body.appendChild(overlay);
-        }
+        // Short fetch timeout so UI doesn't hang forever
+        const controller = new AbortController();
+        const FETCH_TIMEOUT_MS = 30_000; // 30s
+        const fetchTimer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
-      const clearWaitUi = ()=>{
-        if (skipBtn && skipBtn.parentNode) skipBtn.parentNode.removeChild(skipBtn);
-        analyzeBtn.innerHTML = 'วิเคราะห์';
-        // hide overlay if present
-        const ov = document.getElementById('wait-overlay');
-        if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
-      };
+        const res = await fetch('/upload', { method:'POST', body: fd, signal: controller.signal });
+        clearTimeout(fetchTimer);
 
-      const doUpload = async ()=>{
-        // perform the upload/analysis
-        status('อัปโหลดไฟล์และวิเคราะห์...', null);
-        apiStat.textContent = 'กำลังส่งคำขอ...';
-        try{
-          const fd = new FormData();
-          fd.append('file', pickedFile);
-
-          const res = await fetch('/upload', { method:'POST', body: fd });
-          const ct = (res.headers.get('content-type') || '').toLowerCase();
-          if (ct.includes('application/json')) {
-            const json = await res.json();
-            if (json.mode) modeEl.textContent = json.mode.toUpperCase();
-            else modeEl.textContent = 'N/A';
-            const display = { ocr: json.ocr || json.ocr_parsed || json, db_check: json.db_check || null };
-            out.textContent = JSON.stringify(display, null, 2);
-            status('สำเร็จ', 'ok');
-            apiStat.textContent = 'สำเร็จ';
-            try{ localStorage.setItem('last_slip_result', JSON.stringify(display)); }catch(e){}
-            // navigate to full result page
-            window.location.href = '/result';
-            return;
-          } else {
-            const txt = await res.text();
-            out.textContent = JSON.stringify({ error: 'Non-JSON response from server', status: res.status, content_type: ct, body: txt.substring(0, 1500) }, null, 2);
-            status('ล้มเหลว: server returned non-JSON response', null);
-            apiStat.textContent = 'ล้มเหลว';
-          }
-        }catch(err){
-          out.textContent = JSON.stringify({ error: String(err) }, null, 2);
-          status('ล้มเหลว: ' + String(err), null);
+        const ct = (res.headers.get('content-type') || '').toLowerCase();
+        if (ct.includes('application/json')) {
+          const json = await res.json();
+          if (json.mode) modeEl.textContent = json.mode.toUpperCase();
+          else modeEl.textContent = 'N/A';
+          const display = { ocr: json.ocr || json.ocr_parsed || json, db_check: json.db_check || null };
+          out.textContent = JSON.stringify(display, null, 2);
+          status('สำเร็จ', 'ok');
+          apiStat.textContent = 'สำเร็จ';
+          try{ localStorage.setItem('last_slip_result', JSON.stringify(display)); }catch(e){}
+          // navigate to full result page
+          window.location.href = '/result';
+          return;
+        } else {
+          const txt = await res.text();
+          out.textContent = JSON.stringify({ error: 'Non-JSON response from server', status: res.status, content_type: ct, body: txt.substring(0, 1500) }, null, 2);
+          status('ล้มเหลว: server returned non-JSON response', null);
           apiStat.textContent = 'ล้มเหลว';
-        }finally{
-          clearWaitUi();
-          analyzeBtn.disabled = false;
-          analyzeBtn.textContent = 'วิเคราะห์';
         }
-      };
-
-      const timer = setInterval(()=>{
-        remaining -= 1;
-        status(`รอการดำเนินการ: ${remaining}s`, null);
-        // update overlay UI
-        const ov = document.getElementById('wait-overlay');
-        if (ov){
-          const cnt = ov.querySelector('.waitCount');
-          const inner = ov.querySelector('.waitBarInner');
-          if (cnt) cnt.textContent = remaining + 's';
-          if (inner){
-            const pct = Math.max(0, Math.min(100, Math.round((1 - (remaining / 45)) * 100)));
-            inner.style.width = pct + '%';
-          }
-        }
-        if (remaining <= 0){
-          clearInterval(timer);
-          doUpload();
-        }
-      }, 1000);
-
-      skipBtn.onclick = ()=>{
-        clearInterval(timer);
-        doUpload();
-      };
+      }catch(err){
+        out.textContent = JSON.stringify({ error: String(err) }, null, 2);
+        status('ล้มเหลว: ' + String(err), null);
+        apiStat.textContent = 'ล้มเหลว';
+      }finally{
+        analyzeBtn.disabled = false;
+        analyzeBtn.textContent = 'วิเคราะห์';
+      }
     });
 
   copyBtn.addEventListener('click', async ()=>{

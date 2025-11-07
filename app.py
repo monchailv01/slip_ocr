@@ -9,6 +9,7 @@ from ocr_utils import process_slip, _norm_amount, _norm_date_th, _clean_name
 import decimal
 from datetime import datetime
 from check_transfer import check_slip_match
+from check_transfer import connect_db as ct_connect_db
 import os
 
 app = Flask(__name__)
@@ -145,6 +146,27 @@ def upload():
         # Log and return JSON for unexpected errors (prevents HTML traceback pages)
         app.logger.exception("Unhandled exception in /upload")
         return jsonify({"error": f"{type(exc).__name__}: {str(exc)}"}), 500
+
+
+@app.route('/health/db')
+def health_db():
+    """Lightweight DB health check used for deployment health checks.
+
+    Tries to open a short-lived connection with small timeout and run SELECT 1.
+    Returns JSON {ok: true} on success or {ok:false, error: '...'} on failure.
+    """
+    try:
+        # Use short timeout so the endpoint fails fast when firewall blocks or DB unreachable
+        conn = ct_connect_db({'connect_timeout': 5})
+        cur = conn.cursor()
+        cur.execute('SELECT 1')
+        cur.fetchone()
+        cur.close()
+        conn.close()
+        return jsonify({'ok': True, 'db': os.getenv('DB_NAME', 'unknown')}), 200
+    except Exception as e:
+        app.logger.exception('DB health check failed')
+        return jsonify({'ok': False, 'error': f"{type(e).__name__}: {str(e)}"}), 502
 
 
 

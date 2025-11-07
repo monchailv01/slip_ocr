@@ -41,10 +41,16 @@ DEFAULT_DB = {
 
 
 def connect_db(db_conf: Dict[str, Any] = None):
+    """Connect to Postgres. db_conf can override DEFAULT_DB keys.
+
+    Supports an optional key 'connect_timeout' (seconds) to fail fast.
+    """
     cfg = DEFAULT_DB.copy()
     if db_conf:
         cfg.update(db_conf)
-    conn = psycopg2.connect(
+    # allow passing connect_timeout via cfg (psycopg2 param)
+    connect_timeout = cfg.get('connect_timeout')
+    conn_kwargs = dict(
         host=cfg["host"],
         dbname=cfg["dbname"],
         user=cfg["user"],
@@ -52,6 +58,9 @@ def connect_db(db_conf: Dict[str, Any] = None):
         port=cfg["port"],
         sslmode=cfg.get("sslmode", "require"),
     )
+    if connect_timeout is not None:
+        conn_kwargs['connect_timeout'] = int(connect_timeout)
+    conn = psycopg2.connect(**conn_kwargs)
     return conn
 
 
