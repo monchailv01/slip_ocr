@@ -98,18 +98,20 @@ def upload():
                         transfer_date = None
 
             try:
+                # Pass a short DB connect_timeout so that if Azure blocks the app (firewall),
+                # the call will fail fast and the frontend will receive JSON error quickly.
                 db_check = check_slip_match(
-                        amount=amount,
-                        transfer_date=transfer_date,
-                        transfer_time=transfer_time,
-                        receiver_account_number=ocr_data.get('recipient_account'),
-                        sender_name=ocr_data.get('sender_name'),
-                        sender_account_number=ocr_data.get('sender_account'),
-                        db_conf={'auto_reconcile': True, 'caller_id': 'web_ui'},
-                        amount_tolerance=decimal.Decimal('0.00'),
-                        date_tolerance_days=0,
-                        time_tolerance_minutes=5,
-                    )
+                            amount=amount,
+                            transfer_date=transfer_date,
+                            transfer_time=transfer_time,
+                            receiver_account_number=ocr_data.get('recipient_account'),
+                            sender_name=ocr_data.get('sender_name'),
+                            sender_account_number=ocr_data.get('sender_account'),
+                            db_conf={'auto_reconcile': True, 'caller_id': 'web_ui', 'connect_timeout': 5},
+                            amount_tolerance=decimal.Decimal('0.00'),
+                            date_tolerance_days=0,
+                            time_tolerance_minutes=5,
+                        )
             except Exception as e:
                 # capture DB/check errors so frontend can display them
                 db_check = {"error": str(e)}
