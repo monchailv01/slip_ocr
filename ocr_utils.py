@@ -59,8 +59,13 @@ def _norm_date_th(s: str | None) -> str | None:
         mon_num = TH_MONTH.get(mon, None)
         if mon_num:
             y = int(y)
-            if y < 100: y += 2000
-            if y > 2400: y -= 543
+            # Handle two-digit Thai year (e.g., '68' means BE 2568 -> CE 2025)
+            if y < 100:
+                # assume two-digit BE year: add 2500 to get BE year, then convert below
+                y += 2500
+            # If still a BE year (e.g., >2400), convert to CE by subtracting 543
+            if y > 2400:
+                y -= 543
             try:
                 dt = datetime.datetime(y, mon_num, int(d), int(hh), int(mm))
                 return dt.strftime("%Y-%m-%d %H:%M")

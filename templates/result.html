@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Slip Result</title>
+  <style>
+    body{font-family:Inter, Arial, sans-serif;background:#0b1020;color:#e6eef8;margin:0;padding:24px}
+    .wrap{max-width:980px;margin:24px auto}
+    .card{background:#071026;border-radius:12px;padding:20px;border:1px solid #1f2a44}
+    h1{margin:0 0 8px;font-size:20px}
+    .status{font-size:18px;margin-top:12px}
+    .ok{color:#22c55e}
+    .bad{color:#fb7185}
+    pre{background:#051427;padding:12px;border-radius:8px;overflow:auto}
+    .row{display:flex;gap:12px;align-items:center;margin-top:12px}
+    .btn{background:linear-gradient(90deg,#22d3ee,#38bdf8);color:#00121f;padding:8px 12px;border-radius:8px;border:none;cursor:pointer}
+    .muted{color:#94a3b8}
+    .big{font-size:28px;font-weight:600}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Slip Result</h1>
+      <div id="summary" class="status muted">Loading...</div>
+      <div id="details" style="margin-top:14px"></div>
+      <div style="margin-top:18px">
+        <button id="back" class="btn">Back to Upload</button>
+        <button id="showRaw" class="btn" style="margin-left:8px;background:#0d1a33;color:#cfe9ff">Show raw JSON</button>
+      </div>
+    </div>
+
+    <div id="raw" style="margin-top:14px;display:none" class="card">
+      <pre id="rawPre">{}</pre>
+    </div>
+  </div>
+
+<script>
+(function(){
+  const summary = document.getElementById('summary');
+  const details = document.getElementById('details');
+  const raw = document.getElementById('raw');
+  const rawPre = document.getElementById('rawPre');
+  const btnBack = document.getElementById('back');
+  const btnRaw = document.getElementById('showRaw');
+
+  let result = null;
+  try{
+    const txt = localStorage.getItem('last_slip_result');
+    result = txt ? JSON.parse(txt) : null;
+  }catch(e){
+    result = null;
+  }
+
+  if(!result){
+    summary.textContent = 'No result available. Please upload a slip first.';
+    details.innerHTML = '<div class="muted">Go back to upload page to run analysis.</div>';
+  } else {
+    const db = result.db_check || {};
+    const ocr = result.ocr || {};
+    const status = db.status || 'UNKNOWN';
+
+    // Show match status
+    if(status === 'MATCHED'){
+      summary.innerHTML = '<span class="big ok">MATCHED</span>';
+      // show amount from reconciled_row if present, else best_match.amount
+      const amt = (db.reconciled_row && db.reconciled_row.amount) || (db.best_match && db.best_match.amount) || ocr.amount || '';
+      const amtHtml = amt ? `<div style="margin-top:8px">Amount: <strong>${amt} THB</strong></div>` : '';
+      const reconciledNote = db.reconciled ? '<div class="muted">Reconciled</div>' : '';
+      details.innerHTML = `${amtHtml}${reconciledNote}`;
+
+      // If already_reconciled flag present, show message
+      if(db.already_reconciled){
+        details.innerHTML += `<div style="margin-top:8px" class="muted">${db.already_reconciled_message || 'Already reconciled'}</div>`;
+      }
+    } else {
+      summary.innerHTML = '<span class="big bad">NOT MATCHED</span>';
+      // explain why: best_match failed_conditions or list candidates reasons
+      let reasonsHtml = '';
+      if(db.candidates && db.candidates.length){
+        // show first candidate reasons
+        const c0 = db.candidates[0];
+        if(c0.failed_conditions && c0.failed_conditions.length){
+          reasonsHtml += '<ul>' + c0.failed_conditions.map(r => `<li>${r}</li>`).join('') + '</ul>';
+        } else {
+          // if no failed_conditions field, show a generic message
+          reasonsHtml += '<div class="muted">No exact match found. See raw JSON for candidates.</div>';
+        }
+      } else {
+        reasonsHtml += '<div class="muted">No candidates found in DB for provided filters.</div>';
+      }
+      details.innerHTML = `<div><strong>Why not matched:</strong></div>${reasonsHtml}`;
+    }
+
+    // put raw JSON
+    rawPre.textContent = JSON.stringify(result, null, 2);
+  }
+
+  btnBack.addEventListener('click', ()=>{
+    // go back to uploader
+    window.location.href = '/';
+  });
+  btnRaw.addEventListener('click', ()=>{
+    raw.style.display = raw.style.display === 'none' ? 'block' : 'none';
+  });
+})();
+</script>
+</body>
+</html>

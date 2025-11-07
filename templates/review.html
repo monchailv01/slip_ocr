@@ -18,30 +18,6 @@
     color:var(--text);
   }
   .wrap{max-width:980px;margin:40px auto;padding:0 20px}
-  .header{
-    display:flex;justify-content:space-between;align-items:center;margin-bottom:18px
-  }
-  .title{font-weight:800;letter-spacing:.3px;font-size:clamp(20px,3vw,28px)}
-  .badge{font-size:12px;padding:6px 10px;border:1px solid var(--border);
-    border-radius:999px;color:var(--muted);background:#0c1730}
-  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px}
-  .grid{display:grid;gap:16px;grid-template-columns:1fr}
-  @media (min-width:900px){ .grid{grid-template-columns:1.15fr .85fr} }
-
-  .drop{
-    border:1.5px dashed #2a3a60;border-radius:14px;padding:20px; text-align:center;
-    background:linear-gradient(180deg,#0e1830 0,#0c1427 100%);
-    transition:.2s ease;
-  }
-  .drop:hover{border-color:#3a5fa5}
-  .drop input{display:none}
-  .drop h3{margin:6px 0 4px 0}
-  .muted{color:var(--muted)}
-  .btn{
-    appearance:none;border:0; border-radius:10px; padding:10px 16px; font-weight:700;
-    background:linear-gradient(90deg, var(--primary), var(--primary-2));
-    color:#00121f; cursor:pointer; transition:transform .05s ease;
-  }
   .btn[disabled]{opacity:.6;cursor:not-allowed}
   .btn:active{transform:translateY(1px)}
   .row{display:flex;gap:10px;justify-content:center;align-items:center;margin-top:14px}
@@ -63,6 +39,16 @@
   .ghost{background:#0d1a33;color:#cfe9ff;border:1px solid var(--border)}
   .footer{margin-top:24px;color:#7a8aa8;font-size:12px;text-align:center}
   code.kv{padding:6px 8px;border-radius:8px;background:#0e1a36;border:1px solid var(--border)}
+  /* overlay while waiting for bank DB to update */
+  .waitOverlay{
+    position:fixed; inset:0; display:flex;align-items:center;justify-content:center;z-index:1200;
+    background:rgba(2,6,23,0.6); backdrop-filter: blur(3px);
+  }
+  .waitCard{background:linear-gradient(180deg,#071028,#081526);padding:20px;border-radius:12px;border:1px solid #20324a;color:#e6f7ff;min-width:320px;text-align:center}
+  .waitCount{font-size:44px;font-weight:700;margin:6px 0}
+  .waitMsg{color:#a3b6d0;margin-top:6px}
+  .waitBar{height:8px;background:#062036;border-radius:8px;overflow:hidden;margin-top:12px}
+  .waitBarInner{height:100%;background:linear-gradient(90deg,#22d3ee,#38bdf8);width:0%}
 </style>
 </head>
 <body>
@@ -183,52 +169,116 @@
     modeEl.textContent = 'ไม่ทราบ';
   });
 
-  analyzeBtn.addEventListener('click', async ()=>{
-    if (!pickedFile) return;
-    analyzeBtn.disabled = true;
-    analyzeBtn.innerHTML = `<span class="spinner"></span>กำลังประมวลผล...`;
-    status('อัปโหลดไฟล์และวิเคราะห์...', null);
-    apiStat.textContent = 'กำลังส่งคำขอ...';
+    analyzeBtn.addEventListener('click', async ()=>{
+      if (!pickedFile) return;
+      // Start a WAIT before sending to backend so DB can settle (45s default)
+      const WAIT_SECONDS = 45;
+      let remaining = WAIT_SECONDS;
 
-    try{
-      const fd = new FormData();
-      fd.append('file', pickedFile);
+      analyzeBtn.disabled = true;
+      analyzeBtn.innerHTML = `<span class="spinner"></span>Preparing...`;
+      status(`รอการดำเนินการ: ${remaining}s`, null);
+      apiStat.textContent = 'รอการดำเนินการ...';
 
-      // ใช้ endpoint เดิม /upload (ตัว backend จะตัดสินใจ OCR_MODE)
-      const res = await fetch('/upload', { method:'POST', body: fd });
-      const json = await res.json();
-
-      // รองรับผลสองแบบ:
-      // 1) { mode:"llm", result:{...จริง...} }
-      // 2) { mode:"llm", result: "{ ...string... }" }
-      // 3) { bank/date/amount/... } ตรง ๆ
-      let finalObj = json;
-
-      if (json.result) {
-        if (typeof json.result === 'string') {
-          try { finalObj = JSON.parse(json.result); }
-          catch { finalObj = { _raw: json.result }; }
-        } else if (typeof json.result === 'object') {
-          finalObj = json.result;
-        }
+      // create skip button next to analyze button
+      let skipBtn = document.getElementById('skip-wait-btn');
+      if (!skipBtn) {
+        skipBtn = document.createElement('button');
+        skipBtn.id = 'skip-wait-btn';
+        skipBtn.textContent = 'Proceed now';
+        skipBtn.className = 'btn ghost';
+        skipBtn.style.marginLeft = '10px';
+        analyzeBtn.parentNode.appendChild(skipBtn);
       }
 
-      // เพิ่ม meta ไว้โชว์
-      if (json.mode) modeEl.textContent = json.mode.toUpperCase();
-      else modeEl.textContent = 'N/A';
+        // create an overlay showing big countdown and progress bar
+        let overlay = document.getElementById('wait-overlay');
+        if (!overlay){
+          overlay = document.createElement('div');
+          overlay.id = 'wait-overlay';
+          overlay.className = 'waitOverlay';
+          overlay.innerHTML = `
+            <div class="waitCard">
+              <div class="muted">กำลังรอตรวจสอบจากธนาคาร</div>
+              <div class="waitCount">45s</div>
+              <div class="waitMsg">ระบบจะรอ 45 วินาทีให้ข้อมูลอัปเดตในฐานข้อมูล</div>
+              <div class="waitBar"><div class="waitBarInner" style="width:0%"></div></div>
+            </div>`;
+          document.body.appendChild(overlay);
+        }
 
-      out.textContent = JSON.stringify(finalObj, null, 2);
-      status('สำเร็จ', 'ok');
-      apiStat.textContent = 'สำเร็จ';
-    }catch(err){
-      out.textContent = JSON.stringify({ error: String(err) }, null, 2);
-      status('ล้มเหลว: ' + String(err), null);
-      apiStat.textContent = 'ล้มเหลว';
-    }finally{
-      analyzeBtn.disabled = false;
-      analyzeBtn.textContent = 'วิเคราะห์';
-    }
-  });
+      const clearWaitUi = ()=>{
+        if (skipBtn && skipBtn.parentNode) skipBtn.parentNode.removeChild(skipBtn);
+        analyzeBtn.innerHTML = 'วิเคราะห์';
+        // hide overlay if present
+        const ov = document.getElementById('wait-overlay');
+        if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
+      };
+
+      const doUpload = async ()=>{
+        // perform the upload/analysis
+        status('อัปโหลดไฟล์และวิเคราะห์...', null);
+        apiStat.textContent = 'กำลังส่งคำขอ...';
+        try{
+          const fd = new FormData();
+          fd.append('file', pickedFile);
+
+          const res = await fetch('/upload', { method:'POST', body: fd });
+          const ct = (res.headers.get('content-type') || '').toLowerCase();
+          if (ct.includes('application/json')) {
+            const json = await res.json();
+            if (json.mode) modeEl.textContent = json.mode.toUpperCase();
+            else modeEl.textContent = 'N/A';
+            const display = { ocr: json.ocr || json.ocr_parsed || json, db_check: json.db_check || null };
+            out.textContent = JSON.stringify(display, null, 2);
+            status('สำเร็จ', 'ok');
+            apiStat.textContent = 'สำเร็จ';
+            try{ localStorage.setItem('last_slip_result', JSON.stringify(display)); }catch(e){}
+            // navigate to full result page
+            window.location.href = '/result';
+            return;
+          } else {
+            const txt = await res.text();
+            out.textContent = JSON.stringify({ error: 'Non-JSON response from server', status: res.status, content_type: ct, body: txt.substring(0, 1500) }, null, 2);
+            status('ล้มเหลว: server returned non-JSON response', null);
+            apiStat.textContent = 'ล้มเหลว';
+          }
+        }catch(err){
+          out.textContent = JSON.stringify({ error: String(err) }, null, 2);
+          status('ล้มเหลว: ' + String(err), null);
+          apiStat.textContent = 'ล้มเหลว';
+        }finally{
+          clearWaitUi();
+          analyzeBtn.disabled = false;
+          analyzeBtn.textContent = 'วิเคราะห์';
+        }
+      };
+
+      const timer = setInterval(()=>{
+        remaining -= 1;
+        status(`รอการดำเนินการ: ${remaining}s`, null);
+        // update overlay UI
+        const ov = document.getElementById('wait-overlay');
+        if (ov){
+          const cnt = ov.querySelector('.waitCount');
+          const inner = ov.querySelector('.waitBarInner');
+          if (cnt) cnt.textContent = remaining + 's';
+          if (inner){
+            const pct = Math.max(0, Math.min(100, Math.round((1 - (remaining / 45)) * 100)));
+            inner.style.width = pct + '%';
+          }
+        }
+        if (remaining <= 0){
+          clearInterval(timer);
+          doUpload();
+        }
+      }, 1000);
+
+      skipBtn.onclick = ()=>{
+        clearInterval(timer);
+        doUpload();
+      };
+    });
 
   copyBtn.addEventListener('click', async ()=>{
     try{
